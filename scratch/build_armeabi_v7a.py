@@ -5,13 +5,15 @@ import subprocess
 import sys
 import zipfile
 
-sys.path.insert(0, "/root/projects/kpn-adskip/scratch")
-import build_v2_linux as v2
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO_ROOT, "scratch"))
+import build_v2_apk as v2
 
-WORK = "/root/projects/kpn-adskip/scratch/apk_build"
-DECOMPILED = "/root/projects/kpn-adskip/scratch/apk_build/base_decompiled"
-UNSIGNED_APK = "/root/projects/kpn-adskip/scratch/apk_build/kpn-tvplus-adskip-armv7a-unsigned.apk"
-OUTPUT_APK = "/root/projects/kpn-adskip/patch/build/output/kpn-tvplus-adskip-armv7a-aligned-debugSigned.apk"
+WORK = os.path.join(REPO_ROOT, "scratch", "apk_build")
+DECOMPILED = os.path.join(WORK, "base_decompiled")
+UNSIGNED_APK = os.path.join(WORK, "kpn-tvplus-adskip-armv7a-unsigned.apk")
+OUTPUT_DIR = os.path.join(REPO_ROOT, "patch", "build", "output")
+OUTPUT_APK = os.path.join(OUTPUT_DIR, "kpn-tvplus-adskip-armv7a-aligned-debugSigned.apk")
 
 ABI = "armeabi-v7a"
 SPLIT_NAME = "split_config.armeabi_v7a.apk"
@@ -28,11 +30,11 @@ def main():
     print(">>> [1/6] Fresh decompile of base.apk (resources kept original, -r)...")
     if os.path.exists(DECOMPILED):
         shutil.rmtree(DECOMPILED)
-    run(["/usr/bin/java", "-jar", v2.APKTOOL, "d", "-r", os.path.join(WORK, "base.apk"), "-o", DECOMPILED])
+    run([v2.JAVA, "-jar", v2.APKTOOL, "d", "-r", os.path.join(WORK, "base.apk"), "-o", DECOMPILED])
 
     v2.WORK_DIR = WORK
     v2.DECOMPILED = DECOMPILED
-    v2.OUTPUT_DIR = "/root/projects/kpn-adskip/patch/build/output"
+    v2.OUTPUT_DIR = OUTPUT_DIR
     v2.UNSIGNED_APK = UNSIGNED_APK
 
     print(">>> [2/6] Applying AdSkip patches...")
@@ -115,7 +117,7 @@ def main():
 
     print(">>> [6/6] Patching + rebuilding + signing ...")
     v2.patch_manifest()
-    run(["/usr/bin/java", "-jar", v2.APKTOOL, "b", DECOMPILED, "-o", UNSIGNED_APK])
+    run([v2.JAVA, "-jar", v2.APKTOOL, "b", DECOMPILED, "-o", UNSIGNED_APK])
 
     import axml
     with zipfile.ZipFile(os.path.join(WORK, "base.apk")) as zin:
@@ -135,17 +137,16 @@ def main():
     os.replace(tmp, UNSIGNED_APK)
 
     print(">>> Signing with uber-apk-signer...")
-    os.makedirs("/root/projects/kpn-adskip/patch/build/output", exist_ok=True)
-    res = subprocess.run(["/usr/bin/java", "-jar", v2.SIGNER, "-a", UNSIGNED_APK, "-o", "/root/projects/kpn-adskip/patch/build/output", "--allowResign"], capture_output=True, text=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    res = subprocess.run([v2.JAVA, "-jar", v2.SIGNER, "-a", UNSIGNED_APK, "-o", OUTPUT_DIR, "--allowResign"], capture_output=True, text=True)
     print(res.stdout[-3000:])
     if res.stderr: print("SIGNER STDERR:", res.stderr[-3000:])
     if res.returncode != 0:
         raise SystemExit("Signing failed")
 
-    final = "/root/projects/kpn-adskip/patch/build/output/kpn-tvplus-adskip-armv7a-aligned-debugSigned.apk"
-    if os.path.exists(final):
-        shutil.copy2(final, OUTPUT_APK)
-    print("DONE ->", OUTPUT_APK, os.path.getsize(OUTPUT_APK) if os.path.exists(OUTPUT_APK) else -1)
+    if not os.path.exists(OUTPUT_APK):
+        raise SystemExit(f"Signer did not produce {OUTPUT_APK}")
+    print("DONE ->", OUTPUT_APK, os.path.getsize(OUTPUT_APK))
 
 if __name__ == "__main__":
     main()

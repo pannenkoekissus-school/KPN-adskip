@@ -100,4 +100,3 @@ patch/
 | **Media Rewind / Previous** | -15 seconds jump |
 | **Key `S` or `A`** | Skip commercial ad break in 1 jump (+4:30 min) |
 | **Key `Z`** | Undo last jump |
-| **D-Pad Right (with Shift/Alt)** | Skip commercial ad break in 1 jump |

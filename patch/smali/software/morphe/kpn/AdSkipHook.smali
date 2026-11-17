@@ -526,23 +526,19 @@
     invoke-static {v2}, Lsoftware/morphe/kpn/AdSkipHook;->log(Ljava/lang/String;)V
 
     # Forward: 0x5a(90) MEDIA_FAST_FORWARD, 0x57(87) MEDIA_NEXT,
-    #          0x16(22) DPAD_RIGHT, 0x22(34) F
+    #          0x22(34) F
     const/16 v0, 0x5a
     if-eq p0, v0, :do_forward
     const/16 v0, 0x57
-    if-eq p0, v0, :do_forward
-    const/16 v0, 0x16
     if-eq p0, v0, :do_forward
     const/16 v0, 0x22
     if-eq p0, v0, :do_forward
 
     # Rewind: 0x59(89) MEDIA_REWIND, 0x58(88) MEDIA_PREVIOUS,
-    #         0x15(21) DPAD_LEFT, 0x2e(46) R
+    #         0x2e(46) R
     const/16 v0, 0x59
     if-eq p0, v0, :do_rewind
     const/16 v0, 0x58
-    if-eq p0, v0, :do_rewind
-    const/16 v0, 0x15
     if-eq p0, v0, :do_rewind
     const/16 v0, 0x2e
     if-eq p0, v0, :do_rewind

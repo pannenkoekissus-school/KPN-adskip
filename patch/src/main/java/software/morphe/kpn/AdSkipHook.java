@@ -244,14 +244,6 @@ public class AdSkipHook {
             case KeyEvent.KEYCODE_Z:
                 undoLastJump();
                 return true;
-
-            // Long press or special D-Pad actions
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-                if (event.isShiftPressed() || event.isAltPressed()) {
-                    skipAdBreak();
-                    return true;
-                }
-                break;
         }
         return false;
     }
