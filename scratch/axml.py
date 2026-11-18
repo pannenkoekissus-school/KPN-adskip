@@ -51,6 +51,7 @@ TYPE_END_TAG = 0x0103
 TYPE_EOF = 0x0105
 
 ATTR_TYPE_STRING = 0x03
+ATTR_TYPE_REFERENCE = 0x01
 ATTR_TYPE_INT_BOOLEAN = 0x12
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
@@ -174,8 +175,15 @@ def read_file(data):
     return chunks
 
 
-def add_accessibility_service(data):
-    """Inject the accessibility <service> into <application>. Returns bytes."""
+def add_accessibility_service(data, config_res_id=None):
+    """Inject the accessibility <service> into <application>.
+
+    config_res_id: resource id (e.g. 0x7f16xxxx) of the android:accessibilityservice
+    config. When given, a <meta-data android:name="android.accessibilityservice"
+    android:resource="@..."/> child is added to the service - SDK 36 refuses to
+    list an a11y service that has no config resource behind that meta-data.
+
+    Returns bytes."""
     chunks = read_file(data)
     # --- first chunk must be the string pool ---
     ptyp, phs, psize, poff = chunks[0]
@@ -212,6 +220,7 @@ def add_accessibility_service(data):
     elem_service = ensure("service")
     elem_filter = ensure("intent-filter")
     elem_action = ensure("action")
+    elem_metadata = ensure("meta-data")
     android_ns = get_android_ns_idx()
     if android_ns is None:
         android_ns = ensure(ANDROID_NS)
@@ -224,15 +233,23 @@ def add_accessibility_service(data):
     v_perm = ensure(perm_str)
     v_label = ensure(label_str)
     v_action = ensure(action_str)
+    md_name_val = ensure("android.accessibilityservice")
+    resource_attr = ensure("resource")
 
-    # android attribute names our injected elements use. If the pool did not
-    # already contain one of them we append it and must give it a resource-map
-    # entry below, or PackageParser ignores that attribute entirely.
+    # android.R.attr ids for the attribute names our injected elements use,
+    # verified against the android.jar R$attr constant pool (Xamarin
+    # Android.Resource.Attribute bindings). If the pool did not already contain
+    # one of these names we append it and must give it a resource-map entry
+    # below, or PackageParser ignores that attribute entirely.
     FRAMEWORK_ATTR_IDS = {
         "name": 0x01010003,
         "exported": 0x01010010,
-        "permission": 0x01010012,
+        # DO NOT revert to 0x01010012: that id is a DIFFERENT framework attr,
+        # so BIND_ACCESSIBILITY_SERVICE would silently not parse and the a11y
+        # manager would consider the service invalid (never listed/enabled).
+        "permission": 0x01010006,
         "label": 0x01010001,
+        "resource": 0x01010025,  # <meta-data android:resource="@xml/...">
     }
     orig_n = pool["ncount"]  # pool size before we appended anything
 
@@ -279,11 +296,27 @@ def add_accessibility_service(data):
 
     service_attrs = [
         attr(android_ns, name_id, ATTR_TYPE_STRING, v_class),
-        attr(android_ns, exported_id, ATTR_TYPE_INT_BOOLEAN, 0),
+        # MUST be exported=true: Settings/A11yManager resolves the service via
+        # a cross-UID queryIntentServicesAsUser(). With exported=false it is
+        # invisible to other packages and never appears in Settings ->
+        # Accessibility (on API 31+ an intent filter no longer implies
+        # exported, so it has to be said explicitly).
+        attr(android_ns, exported_id, ATTR_TYPE_INT_BOOLEAN, 1),
         attr(android_ns, permission_id, ATTR_TYPE_STRING, v_perm),
         attr(android_ns, label_id, ATTR_TYPE_STRING, v_label),
     ]
     action_attrs = [attr(android_ns, name_id, ATTR_TYPE_STRING, v_action)]
+
+    md_chunk = b""
+    if config_res_id is not None:
+        # Android 16 (SDK 36) only lists a11y services whose android.accessibilityservice
+        # meta-data resolves to a real config resource. The resource is a
+        # hijacked (byte-swapped) res/xml entry; the id itself never changes.
+        md_attrs = [
+            attr(android_ns, name_id, ATTR_TYPE_STRING, md_name_val),
+            attr(android_ns, resource_attr, ATTR_TYPE_REFERENCE, config_res_id),
+        ]
+        md_chunk = start_tag(elem_metadata, md_attrs) + end_tag(elem_metadata)
 
     service_chunk = (
         start_tag(elem_service, service_attrs)
@@ -291,6 +324,7 @@ def add_accessibility_service(data):
         + start_tag(elem_action, action_attrs)
         + end_tag(elem_action)
         + end_tag(elem_filter)
+        + md_chunk
         + end_tag(elem_service)
     )
 
@@ -312,7 +346,14 @@ def add_accessibility_service(data):
         map_entries.append(0)
     for s, rid in FRAMEWORK_ATTR_IDS.items():
         i = idx_of(s)
-        if i is not None and i >= orig_n:
+        if i is None:
+            continue
+        if i >= orig_n or map_entries[i] == 0:
+            # Appended string: jump to its freshly allocated map slot. Or a
+            # pre-existing string whose slot is still empty (the original never
+            # used it as an attribute name): assigning here is safe and makes
+            # the injected element's attribute resolvable by id. Pre-existing
+            # non-zero slots are the platform's own ids and are left untouched.
             map_entries[i] = rid
     new_map = (
         struct.pack("<II", (0x8 << 16) | TYPE_RES_MAP, 8 + 4 * len(map_entries))
@@ -381,6 +422,25 @@ def verify(data):
                             if pool["strings"][dval] == "software.morphe.kpn.AdSkipAccessibilityService":
                                 return True
     return False
+
+
+def collect_resource_refs(data):
+    """Every resource id referenced by a typed reference attribute anywhere in
+    the (binary) manifest - TYPE_REFERENCE (0x01) or TYPE_ATTRIBUTE (0x02).
+
+    Used to prove a res/xml candidate is unreferenced (i.e. safe to hijack) by
+    checking its resource id is absent from this set."""
+    refs = set()
+    for (ct, _hs, _cs, co) in read_file(data):
+        if ct != TYPE_START_TAG:
+            continue
+        attrStart, _attrSize, attrCount = struct.unpack_from("<HHH", data, co + 24)
+        for i in range(attrCount):
+            aoff = co + 16 + attrStart + i * 20
+            dtype = data[aoff + 15]
+            if dtype in (0x01, 0x02):
+                refs.add(struct.unpack_from("<I", data, aoff + 16)[0])
+    return refs
 
 
 def pool_info(data):

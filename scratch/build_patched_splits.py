@@ -62,6 +62,10 @@ PATCH_HOOK_SRC = os.path.join(REPO_ROOT, "patch", "smali", "software", "morphe",
 # Binary-AXML manifest patcher (injects the accessibility <service>).
 import axml
 
+# resources.arsc xml-type enumerator + generated a11y config resource.
+import arsc_xml
+import resxml
+
 PRISTINE_BASE = os.path.join(WORK_DIR, "base.apk")
 BASE_DECOMPILED = os.path.join(WORK_DIR, "base_decompiled")
 PATCHED_BASE_UNSIGNED = os.path.join(WORK_DIR, "patched_base.apk")
@@ -162,6 +166,40 @@ def patch_remote_key_shortcuts():
     log("  MainActivity.smali dispatchKeyEvent: patched (remote key shortcuts enabled)")
 
 
+# --- accessibility config resource hijack -----------------------------------
+# SDK 36 will not list an a11y service that lacks a real android:accessibilityservice
+# config resource, and we cannot add an arsc entry (no resource-table surgery).
+# So a generated binary-XML config shadows an EXISTING, UNREFERENCED res/xml
+# resource: same zip path + arsc entry id, only the file bytes change. The
+# injected <service>'s meta-data points at that id. Never touch splits0.xml
+# (system-side, consumed at install time).
+XML_VICTIM_NEVER = {"splits0"}
+
+
+def pick_victim(xml_res, manifest_refs):
+    """Choose the res/xml resource whose file bytes the a11y config replaces.
+
+    xml_res: {resource_id: key_name} from arsc_xml.enum_xml_resources.
+    Refuses to guess: aborts the build when no unreferenced candidate exists.
+    Prefers operator_settings.xml (TV app, no code ever reads it)."""
+    candidates = []
+    for rid, key in sorted(xml_res.items()):
+        if key in XML_VICTIM_NEVER:
+            continue
+        if rid in manifest_refs:
+            continue
+        candidates.append((rid, key))
+    if not candidates:
+        raise SystemExit(
+            "FATAL: no unreferenced res/xml resource to shadow with the "
+            "accessibility config (xml entries=%d, manifest refs=%d). "
+            "Refusing to guess."
+            % (len(xml_res), len(manifest_refs))
+        )
+    candidates.sort(key=lambda t: (t[1] != "operator_settings", t[0]))
+    return candidates[0]
+
+
 def rebuild_base():
     log(">>> Rebuilding base.apk with apktool...")
     build_dir = os.path.join(BASE_DECOMPILED, "build")
@@ -180,7 +218,22 @@ def rebuild_base():
     # byte of the pristine manifest intact.
     with zipfile.ZipFile(PRISTINE_BASE) as zin:
         orig_manifest = zin.read("AndroidManifest.xml")
-    patched_manifest = axml.add_accessibility_service(orig_manifest)
+        orig_arsc = zin.read("resources.arsc")
+
+    # Pick an unreferenced res/xml resource to shadow with the a11y config,
+    # generate the config bytes, and hand its resource id to the manifest
+    # patcher so the injected <service> meta-data points at it.
+    manifest_refs = axml.collect_resource_refs(orig_manifest)
+    xml_res = arsc_xml.enum_xml_resources(orig_arsc)
+    victim_rid, victim_key = pick_victim(xml_res, manifest_refs)
+    a11y_config = resxml.make_accessibility_config()
+    resxml.validate_config(a11y_config)
+    log(
+        f"  A11Y config resource -> res/xml/{victim_key}.xml "
+        f"(id 0x{victim_rid:08x}, unreferenced, {len(a11y_config)} bytes)"
+    )
+
+    patched_manifest = axml.add_accessibility_service(orig_manifest, config_res_id=victim_rid)
     if not axml.verify(patched_manifest):
         raise SystemExit(
             "FATAL: injected accessibility <service> not found in rebuilt "
@@ -196,18 +249,32 @@ def rebuild_base():
         f"  A11Y <service> injected into binary manifest "
         f"(pool utf8={pool['utf8']} strings={pool['ncount']} flags={pool['flags']:#x})"
     )
-    tmp = PATCHED_BASE_UNSIGNED + ".reman"
+    swap_entries = {"AndroidManifest.xml": patched_manifest}
     with zipfile.ZipFile(PATCHED_BASE_UNSIGNED) as zin:
+        xml_targets = [
+            n for n in zin.namelist()
+            if n.startswith("res/xml") and os.path.basename(n) == victim_key + ".xml"
+        ]
+        if not xml_targets:
+            raise SystemExit(
+                "FATAL: victim resource res/xml/%s.xml missing from the rebuilt "
+                "base.apk zip - refusing to ship a config-less a11y service"
+                % victim_key
+            )
+        for n in xml_targets:
+            swap_entries[n] = a11y_config
+        tmp = PATCHED_BASE_UNSIGNED + ".reman"
         with zipfile.ZipFile(tmp, "w") as zout:
             for item in zin.infolist():
                 if item.filename.startswith("META-INF/"):
                     continue
-                data = zin.read(item.filename)
-                if item.filename == "AndroidManifest.xml":
-                    data = patched_manifest
-                zout.writestr(item, data)
+                zout.writestr(item, swap_entries.get(item.filename, zin.read(item.filename)))
     os.replace(tmp, PATCHED_BASE_UNSIGNED)
     log(f"  Replaced AndroidManifest.xml ({len(patched_manifest)} bytes, was {len(orig_manifest)})")
+    log(
+        f"  Replaced res/xml/{victim_key}.xml with generated a11y config "
+        f"({len(a11y_config)} bytes)"
+    )
 
     verify_patches_present()
 

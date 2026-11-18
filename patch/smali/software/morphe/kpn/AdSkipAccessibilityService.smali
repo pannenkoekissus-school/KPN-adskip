@@ -112,9 +112,7 @@
     return-void
 
     :do_click
-    invoke-virtual {p1}, Landroid/view/accessibility/AccessibilityEvent;->getSource()Landroid/view/accessibility/AccessibilityNodeInfo;
-    move-result-object v1
-    invoke-static {v1}, Lsoftware/morphe/kpn/AdSkipAccessibilityService;->handleClick(Landroid/view/accessibility/AccessibilityNodeInfo;)V
+    invoke-static {p1}, Lsoftware/morphe/kpn/AdSkipAccessibilityService;->handleClick(Landroid/view/accessibility/AccessibilityEvent;)V
     return-void
 
     :do_scroll
@@ -130,18 +128,18 @@
     return-void
 .end method
 
-.method private static handleClick(Landroid/view/accessibility/AccessibilityNodeInfo;)V
-    .registers 10
+.method private static handleClick(Landroid/view/accessibility/AccessibilityEvent;)V
+    .registers 8
 
     if-eqz p0, :return
 
-    invoke-virtual {p0}, Landroid/view/accessibility/AccessibilityNodeInfo;->getClassName()Ljava/lang/CharSequence;
+    # NOTE: event-field detection needs NO window-content capability -- a
+    # TYPE_VIEW_CLICKED event carries the source's class + contentDescription
+    # as plain fields, so no meta-data xml / resources.arsc surgery required.
+    invoke-virtual {p0}, Landroid/view/accessibility/AccessibilityEvent;->getClassName()Ljava/lang/CharSequence;
     move-result-object v1
-    invoke-virtual {p0}, Landroid/view/accessibility/AccessibilityNodeInfo;->getContentDescription()Ljava/lang/CharSequence;
+    invoke-virtual {p0}, Landroid/view/accessibility/AccessibilityEvent;->getContentDescription()Ljava/lang/CharSequence;
     move-result-object v2
-    new-instance v3, Landroid/graphics/Rect;
-    invoke-direct {v3}, Landroid/graphics/Rect;-><init>()V
-    invoke-virtual {p0, v3}, Landroid/view/accessibility/AccessibilityNodeInfo;->getBoundsInScreen(Landroid/graphics/Rect;)V
 
     new-instance v4, Ljava/lang/StringBuilder;
     invoke-direct {v4}, Ljava/lang/StringBuilder;-><init>()V
@@ -151,9 +149,6 @@
     const-string v5, " cd="
     invoke-virtual {v4, v5}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
     invoke-virtual {v4, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/CharSequence;)Ljava/lang/StringBuilder;
-    const-string v5, " bounds="
-    invoke-virtual {v4, v5}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
-    invoke-virtual {v4, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
     invoke-virtual {v4}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
     move-result-object v4
     invoke-static {v4}, Lsoftware/morphe/kpn/AdSkipHook;->log(Ljava/lang/String;)V
