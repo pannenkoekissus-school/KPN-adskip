@@ -224,6 +224,10 @@ public class AdSkipHook {
         log("onKeyDown code=" + keyCode);
 
         switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return false;
+
             case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
             case KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD:
                 relativeJump(JUMP_30S_MS);

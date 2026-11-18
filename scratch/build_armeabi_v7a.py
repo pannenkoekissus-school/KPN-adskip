@@ -71,12 +71,17 @@ def main():
     # === KPN TV+ AdSkip Hook: intercept keys via dispatchKeyEvent ===
     invoke-virtual {p1}, Landroid/view/KeyEvent;->getKeyCode()I
     move-result v0
+    const/16 v1, 0x15
+    if-eq v0, v1, :cond_adskip_dpad_done
+    const/16 v1, 0x16
+    if-eq v0, v1, :cond_adskip_dpad_done
     invoke-static {v0, p1}, Lsoftware/morphe/kpn/AdSkipHook;->onKeyDown(ILandroid/view/KeyEvent;)Z
     move-result v0
     if-eqz v0, :cond_adskip_default
     const/4 v0, 0x1
     return v0
 
+    :cond_adskip_dpad_done
     :cond_adskip_default
 
 """

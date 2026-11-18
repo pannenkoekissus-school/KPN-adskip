@@ -516,6 +516,11 @@
     return v0
 
     :cond_0
+    const/16 v0, 0x15
+    if-eq p0, v0, :ignore_dpad
+    const/16 v0, 0x16
+    if-eq p0, v0, :ignore_dpad
+
     new-instance v2, Ljava/lang/StringBuilder;
     invoke-direct {v2}, Ljava/lang/StringBuilder;-><init>()V
     const-string v3, "KEYDOWN code="
@@ -578,6 +583,10 @@
     :do_undo
     invoke-static {}, Lsoftware/morphe/kpn/AdSkipHook;->undoLastJump()V
     const/4 v0, 0x1
+    return v0
+
+    :ignore_dpad
+    const/4 v0, 0x0
     return v0
 .end method
 
